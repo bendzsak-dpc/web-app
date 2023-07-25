@@ -36,11 +36,32 @@ RUN ng build --output-path=/dist $BUILD_ENVIRONMENT_OPTIONS
 ###############
 ### STAGE 2: Serve app with nginx ###
 ###############
-FROM $NGINX_IMAGE
+FROM amazonlinux:2023
 
-COPY --from=builder /dist /usr/share/nginx/html
+ARG CACHEBUST=1
 
-EXPOSE 80
+RUN dnf -y upgrade && \
+# Install nginx
+    dnf -y install nginx && \
+# Create the non-root user to run the application
+    dnf -y install shadow-utils && \
+    groupadd --system --gid 1000 nginxgroup && \
+    useradd --uid 1000 --gid nginxgroup --no-user-group nginxuser && \
+    dnf -y remove shadow-utils && \
+# Install envsubst
+    dnf -y install gettext && \
+# Clean up the yum cache
+    dnf -y clean all
+
+RUN mkdir -p /app/logs
+RUN rm -rf /var/log/nginx && ln -sf /app/logs /var/log/nginx
+RUN chown -R nginxuser:nginxgroup /var/lib/nginx/
+RUN chown -R nginxuser:nginxgroup /app
+
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY --from=builder --chown=nginxuser:nginxgroup /dist /app/html
+EXPOSE 4200
+USER nginxuser:nginxgroup
 
 # When the container starts, replace the env.js with values from environment variables
-CMD ["/bin/sh",  "-c",  "envsubst < /usr/share/nginx/html/assets/env.template.js > /usr/share/nginx/html/assets/env.js && exec nginx -g 'daemon off;'"]
+CMD ["/bin/sh",  "-c",  "envsubst < /app/html/assets/env.template.js > /app/html/assets/env.js && exec nginx -g 'daemon off;'"]
